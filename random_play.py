@@ -7,11 +7,12 @@ import signal
 import argparse
 from python_mpv_jsonipc import MPV
 
-def select_random_video(video_ids, start, end):
+def select_random_video(video_ids, video_titles, start, end):
     """Select a random video from the list."""
     random_line = random.randint(start, end)
     video_id = video_ids[random_line - 1]
-    return f"https://www.youtube.com/watch?v={video_id}"
+    video_title = video_titles[random_line - 1] if random_line - 1 < len(video_titles) else ''
+    return f"https://www.youtube.com/watch?v={video_id}", video_id, video_title
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Play random YouTube videos from a channel.')
@@ -31,15 +32,41 @@ CACHE_FILE = os.path.join(CACHE_DIR, f"{CHANNEL_ID}.txt")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-if not os.path.isfile(CACHE_FILE):
+# Check if cache exists and is in new format (with titles)
+if os.path.isfile(CACHE_FILE):
+    # Check if cache is in new format (ID\ttitle)
+    with open(CACHE_FILE) as f:
+        first_line = f.readline().strip()
+        if first_line and '\t' in first_line:
+            # New format detected - read all lines
+            f.seek(0)  # Reset to beginning
+            video_data = [line.strip().split('\t') for line in f if line.strip()]
+            video_ids = [data[0] for data in video_data]
+            video_titles = [data[1] for data in video_data]
+        else:
+            # Old format or empty - delete and regenerate
+            print(f"Cache file {CACHE_FILE} is in old format, deleting and regenerating...")
+            os.remove(CACHE_FILE)
+            # Fall through to regeneration
+            video_ids = []
+            video_titles = []
+else:
+    # Cache doesn't exist
+    video_ids = []
+    video_titles = []
+
+# Regenerate cache if needed
+if not video_ids:
     subprocess.run(
-        f'yt-dlp --flat-playlist -j "https://www.youtube.com/channel/{CHANNEL_ID}" | jq -r \'.id\' > "{CACHE_FILE}"',
+        f'yt-dlp --flat-playlist -j "https://www.youtube.com/channel/{CHANNEL_ID}" | jq -r \'[.id, .title] | @tsv\' > "{CACHE_FILE}"',
         shell=True,
         check=True
     )
-
-with open(CACHE_FILE) as f:
-    video_ids = [line.strip() for line in f if line.strip()]
+    # Read the newly generated cache
+    with open(CACHE_FILE) as f:
+        video_data = [line.strip().split('\t') for line in f if line.strip()]
+        video_ids = [data[0] for data in video_data]
+        video_titles = [data[1] for data in video_data]
 
 total = len(video_ids)
 if RANGE:
@@ -60,20 +87,32 @@ if PLAYLIST_SIZE:
         random.shuffle(indices)
     selected_indices = indices[:available_videos]
 
-    # Create playlist URLs
-    playlist_urls = [f"https://www.youtube.com/watch?v={video_ids[i]}" for i in selected_indices]
+    # Create playlist URLs and get titles
+    playlist_urls = []
+    playlist_info = []
+    for i in selected_indices:
+        video_id = video_ids[i]
+        video_title = video_titles[i] if i < len(video_titles) else ''
+        playlist_urls.append(f"https://www.youtube.com/watch?v={video_id}")
+        playlist_info.append((video_id, video_title))
+
     print(f"Generated playlist of {len(playlist_urls)} videos")
+    # Print playlist info
+    for idx, (vid, title) in enumerate(playlist_info, 1):
+        print(f"  {idx}. {vid} | {title}")
 
     # First video for initial playback
     youtube_url = playlist_urls[0]
     remaining_playlist = playlist_urls[1:] if len(playlist_urls) > 1 else []
 else:
     # Single random video mode (original behavior)
-    youtube_url = select_random_video(video_ids, start, end)
+    youtube_url, video_id, video_title = select_random_video(video_ids, video_titles, start, end)
     remaining_playlist = []
+    # Print video info
+    print(f"Selected: {video_id} | {video_title}")
 
 SOCKET = f"/tmp/mpv_socket_{os.getpid()}"
-MPV_LOG = os.path.expanduser("~/mpv_scriptlog.txt")
+MPV_LOG = "mpv_scriptlog.txt"
 
 # Kill any existing mpv process using the same socket
 if os.path.exists(SOCKET):
@@ -124,9 +163,13 @@ for url in remaining_playlist:
     mpv.command("loadfile", url, "append-play")
 
 try:
-    # Wait for user to interrupt
+    # Wait for user to interrupt or MPV to exit
     while True:
-        time.sleep(1)
+        time.sleep(0.5)
+        # Check if MPV process has terminated
+        if mpv_proc.poll() is not None:
+            print("MPV has exited, cleaning up...")
+            break
 except KeyboardInterrupt:
     print("Exiting and cleaning up...")
 finally:
