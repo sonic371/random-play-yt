@@ -7,19 +7,18 @@ import signal
 import argparse
 from python_mpv_jsonipc import MPV
 
-def select_random_video(video_ids, video_titles, start, end):
-    """Select a random video from the list."""
-    random_line = random.randint(start, end)
-    video_id = video_ids[random_line - 1]
-    video_title = video_titles[random_line - 1] if random_line - 1 < len(video_titles) else ''
-    return f"https://www.youtube.com/watch?v={video_id}", video_id, video_title
-
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='Play random YouTube videos from a channel.')
 parser.add_argument('channel_id', help='YouTube channel ID')
 parser.add_argument('range', nargs='?', help='Range of videos (e.g., 1-100)')
 parser.add_argument('--playlist', type=int, help='Create playlist of N random videos')
 parser.add_argument('--shuffle', action='store_true', help='Shuffle the playlist')
+parser.add_argument('--min-duration', type=int, help='Minimum video duration in seconds')
+parser.add_argument('--max-duration', type=int, help='Maximum video duration in seconds')
+parser.add_argument('--after-date', help='Only videos uploaded on or after this date (YYYYMMDD)')
+parser.add_argument('--before-date', help='Only videos uploaded on or before this date (YYYYMMDD)')
+parser.add_argument('--shorts', action='store_true', help='Only show Shorts (videos with #shorts in title)')
+parser.add_argument('--no-shorts', action='store_true', help='Exclude Shorts')
 args = parser.parse_args()
 
 CHANNEL_ID = args.channel_id
@@ -32,41 +31,45 @@ CACHE_FILE = os.path.join(CACHE_DIR, f"{CHANNEL_ID}.txt")
 
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# Check if cache exists and is in new format (with titles)
+# Cache format: id\ttitle\tduration\ttimestamp\tupload_date
+NUM_CACHE_COLUMNS = 5
+
 if os.path.isfile(CACHE_FILE):
-    # Check if cache is in new format (ID\ttitle)
     with open(CACHE_FILE) as f:
         first_line = f.readline().strip()
         if first_line and '\t' in first_line:
-            # New format detected - read all lines
-            f.seek(0)  # Reset to beginning
+            f.seek(0)
             video_data = [line.strip().split('\t') for line in f if line.strip()]
+            # Pad short lines (old format upgrade) with empty values
             video_ids = [data[0] for data in video_data]
-            video_titles = [data[1] for data in video_data]
+            video_titles = [data[1] if len(data) > 1 else '' for data in video_data]
+            video_durations = [data[2] if len(data) > 2 else '' for data in video_data]
+            video_timestamps = [data[3] if len(data) > 3 else '' for data in video_data]
+            video_upload_dates = [data[4] if len(data) > 4 else '' for data in video_data]
         else:
-            # Old format or empty - delete and regenerate
             print(f"Cache file {CACHE_FILE} is in old format, deleting and regenerating...")
             os.remove(CACHE_FILE)
-            # Fall through to regeneration
             video_ids = []
-            video_titles = []
+            video_titles = video_durations = video_timestamps = video_upload_dates = []
 else:
-    # Cache doesn't exist
     video_ids = []
-    video_titles = []
+    video_titles = video_durations = video_timestamps = video_upload_dates = []
 
-# Regenerate cache if needed
 if not video_ids:
+    print(f"Fetching video metadata for channel {CHANNEL_ID}...")
     subprocess.run(
-        f'yt-dlp --flat-playlist -j "https://www.youtube.com/channel/{CHANNEL_ID}" | jq -r \'[.id, .title] | @tsv\' > "{CACHE_FILE}"',
+        f'yt-dlp --flat-playlist -j --extractor-args "youtubetab:approximate_date" "https://www.youtube.com/channel/{CHANNEL_ID}" | jq -r \'[.id, .title, .duration // empty, .timestamp // empty, .upload_date // empty] | @tsv\' > "{CACHE_FILE}"',
         shell=True,
         check=True
     )
-    # Read the newly generated cache
     with open(CACHE_FILE) as f:
         video_data = [line.strip().split('\t') for line in f if line.strip()]
         video_ids = [data[0] for data in video_data]
-        video_titles = [data[1] for data in video_data]
+        video_titles = [data[1] if len(data) > 1 else '' for data in video_data]
+        video_durations = [data[2] if len(data) > 2 else '' for data in video_data]
+        video_timestamps = [data[3] if len(data) > 3 else '' for data in video_data]
+        video_upload_dates = [data[4] if len(data) > 4 else '' for data in video_data]
+    print(f"Fetched {len(video_ids)} videos")
 
 total = len(video_ids)
 if RANGE:
@@ -74,42 +77,100 @@ if RANGE:
 else:
     start, end = 1, total
 
+# Apply metadata filters
+MIN_DURATION = args.min_duration
+MAX_DURATION = args.max_duration
+AFTER_DATE = args.after_date
+BEFORE_DATE = args.before_date
+SHORTS_ONLY = args.shorts
+NO_SHORTS = args.no_shorts
+
+def is_short(title):
+    return '#shorts' in title.lower()
+
+any_filters = MIN_DURATION or MAX_DURATION or AFTER_DATE or BEFORE_DATE or SHORTS_ONLY or NO_SHORTS
+if any_filters:
+    filtered_indices = []
+    for i in range(start - 1, end):
+        include = True
+        if SHORTS_ONLY and not is_short(video_titles[i]):
+            include = False
+        if include and NO_SHORTS and is_short(video_titles[i]):
+            include = False
+        if include and MIN_DURATION and video_durations[i]:
+            try:
+                if float(video_durations[i]) < MIN_DURATION:
+                    include = False
+            except ValueError:
+                pass
+        if include and MAX_DURATION and video_durations[i]:
+            try:
+                if float(video_durations[i]) > MAX_DURATION:
+                    include = False
+            except ValueError:
+                pass
+        if include and AFTER_DATE and video_upload_dates[i]:
+            if video_upload_dates[i] < AFTER_DATE:
+                include = False
+        if include and BEFORE_DATE and video_upload_dates[i]:
+            if video_upload_dates[i] > BEFORE_DATE:
+                include = False
+        if include:
+            filtered_indices.append(i)
+    if not filtered_indices:
+        print("No videos match the filter criteria. Exiting.")
+        sys.exit(1)
+    filtered_start = 1
+    filtered_end = len(filtered_indices)
+    print(f"Filtered: {len(filtered_indices)} videos match criteria out of {end - start + 1} in range")
+else:
+    filtered_indices = list(range(start - 1, end))
+    filtered_start, filtered_end = start, end
+
 # Generate playlist or single video
 if PLAYLIST_SIZE:
-    # Ensure playlist size doesn't exceed available videos
-    available_videos = min(PLAYLIST_SIZE, end - start + 1)
+    available_videos = min(PLAYLIST_SIZE, len(filtered_indices))
     if available_videos < PLAYLIST_SIZE:
-        print(f"Warning: Only {available_videos} videos available in range {start}-{end}")
+        print(f"Warning: Only {available_videos} videos match criteria")
 
-    # Generate non-repeating random indices
-    indices = list(range(start - 1, end))  # Convert to 0-based
     if SHUFFLE:
-        random.shuffle(indices)
-    selected_indices = indices[:available_videos]
+        random.shuffle(filtered_indices)
+        selected_indices = filtered_indices[:available_videos]
+    else:
+        selected_indices = random.sample(filtered_indices, available_videos)
 
-    # Create playlist URLs and get titles
+    # Create playlist URLs and get metadata
     playlist_urls = []
     playlist_info = []
     for i in selected_indices:
         video_id = video_ids[i]
         video_title = video_titles[i] if i < len(video_titles) else ''
+        duration = video_durations[i] if i < len(video_durations) else ''
+        upload_date = video_upload_dates[i] if i < len(video_upload_dates) else ''
         playlist_urls.append(f"https://www.youtube.com/watch?v={video_id}")
-        playlist_info.append((video_id, video_title))
+        playlist_info.append((video_id, video_title, duration, upload_date))
 
     print(f"Generated playlist of {len(playlist_urls)} videos")
-    # Print playlist info
-    for idx, (vid, title) in enumerate(playlist_info, 1):
-        print(f"  {idx}. {vid} | {title}")
+    for idx, (vid, title, dur, date) in enumerate(playlist_info, 1):
+        dur_str = f" ({int(float(dur))}s)" if dur else ""
+        date_str = f" [{date}]" if date else ""
+        print(f"  {idx}. {vid}{date_str} | {title}{dur_str}")
 
     # First video for initial playback
     youtube_url = playlist_urls[0]
     remaining_playlist = playlist_urls[1:] if len(playlist_urls) > 1 else []
 else:
-    # Single random video mode (original behavior)
-    youtube_url, video_id, video_title = select_random_video(video_ids, video_titles, start, end)
+    # Single random video mode
+    idx = random.choice(filtered_indices)
+    video_id = video_ids[idx]
+    video_title = video_titles[idx] if idx < len(video_titles) else ''
+    duration = video_durations[idx] if idx < len(video_durations) else ''
+    upload_date = video_upload_dates[idx] if idx < len(video_upload_dates) else ''
+    youtube_url = f"https://www.youtube.com/watch?v={video_id}"
     remaining_playlist = []
-    # Print video info
-    print(f"Selected: {video_id} | {video_title}")
+    dur_str = f" ({int(float(duration))}s)" if duration else ""
+    date_str = f" [{upload_date}]" if upload_date else ""
+    print(f"Selected: {video_id}{date_str} | {video_title}{dur_str}")
 
 SOCKET = f"/tmp/mpv_socket_{os.getpid()}"
 MPV_LOG = "mpv_scriptlog.txt"
