@@ -19,6 +19,8 @@ parser.add_argument('--after-date', help='Only videos uploaded on or after this 
 parser.add_argument('--before-date', help='Only videos uploaded on or before this date (YYYYMMDD)')
 parser.add_argument('--shorts', action='store_true', help='Only show Shorts (videos with #shorts in title)')
 parser.add_argument('--no-shorts', action='store_true', help='Exclude Shorts')
+parser.add_argument('--max-resolution', type=int,
+    help='Maximum video height (e.g., 1080 to cap at 1080p)')
 args = parser.parse_args()
 
 CHANNEL_ID = args.channel_id
@@ -216,6 +218,12 @@ mpv = MPV(ipc_socket=SOCKET, start_mpv=False)
 print("Loading and looping loading.mp4...")
 mpv.loadfile(LOADING_VIDEO, "replace")
 mpv.loop_file = "inf"
+
+# Apply resolution cap via mpv's built-in yt-dlp integration
+if args.max_resolution:
+    fmt = f"bestvideo[height<=?{args.max_resolution}]+bestaudio/best[height<=?{args.max_resolution}]"
+    mpv.ytdl_format = fmt
+    print(f"Resolution capped at {args.max_resolution}p")
 
 print("Appending YouTube video to playlist (seamless transition)...")
 mpv.command("loadfile", youtube_url, "append-play")
