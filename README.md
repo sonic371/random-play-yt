@@ -5,15 +5,15 @@ Play random YouTube videos from a channel using `mpv` with seamless transitions.
 ## Requirements
 
 - Python 3 + `python-mpv-jsonipc`
-- `yt-dlp`, `jq`, `mpv`, `lsof`
+- `yt-dlp`, `jq`, `mpv`
 - `loading.mp4` in the script directory (placeholder video while YouTube loads)
 
 ```bash
 pip install python-mpv-jsonipc
 # Arch Linux
-sudo pacman -S yt-dlp jq mpv lsof
+sudo pacman -S yt-dlp jq mpv
 # Ubuntu/Debian
-sudo apt install yt-dlp jq mpv lsof
+sudo apt install yt-dlp jq mpv
 ```
 
 ## Usage
