@@ -151,10 +151,19 @@ if PLAYLIST_SIZE:
         playlist_info.append((video_id, video_title, duration, upload_date))
 
     print(f"Generated playlist of {len(playlist_urls)} videos")
+    # Format and align columns
+    rows = []
+    max_num_width = max(len(str(len(playlist_info))), 2)
+    max_id_width = 11  # YouTube IDs are 11 chars
+    max_date_width = 10  # YYYY-MM-DD is 10 chars
+    max_dur_width = 5  # e.g. "XXXs" or "—"
     for idx, (vid, title, dur, date) in enumerate(playlist_info, 1):
-        dur_str = f" ({int(float(dur))}s)" if dur else ""
-        date_str = f" [{date}]" if date else ""
-        print(f"  {idx}. {vid}{date_str} | {title}{dur_str}")
+        date_fmt = f"{date[:4]}-{date[4:6]}-{date[6:8]}" if date else "—"
+        dur_fmt = f"{int(float(dur))}s" if dur else "—"
+        rows.append((idx, vid, date_fmt, dur_fmt, title))
+
+    for num, vid, date, dur, title in rows:
+        print(f"  {num:>{max_num_width}}. {vid}  {date:<{max_date_width}}  {dur:>{max_dur_width}}  {title}")
 
     # First video for initial playback
     youtube_url = playlist_urls[0]
@@ -168,9 +177,9 @@ else:
     upload_date = video_upload_dates[idx] if idx < len(video_upload_dates) else ''
     youtube_url = f"https://www.youtube.com/watch?v={video_id}"
     remaining_playlist = []
-    dur_str = f" ({int(float(duration))}s)" if duration else ""
-    date_str = f" [{upload_date}]" if upload_date else ""
-    print(f"Selected: {video_id}{date_str} | {video_title}{dur_str}")
+    date_fmt = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}" if upload_date else "—"
+    dur_fmt = f"{int(float(duration))}s" if duration else "—"
+    print(f"Selected: {video_id}  {date_fmt}  {dur_fmt:>4s}  {video_title}")
 
 SOCKET = f"/tmp/mpv_socket_{os.getpid()}"
 MPV_LOG = "mpv_scriptlog.txt"
