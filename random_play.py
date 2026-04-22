@@ -4,14 +4,8 @@ import random
 import subprocess
 import time
 import signal
-import select
-import tty
-import termios
+import argparse
 from python_mpv_jsonipc import MPV
-
-def is_key_pressed():
-    """Check if a key is pressed without blocking."""
-    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
 def select_random_video(video_ids, start, end):
     """Select a random video from the list."""
@@ -19,8 +13,18 @@ def select_random_video(video_ids, start, end):
     video_id = video_ids[random_line - 1]
     return f"https://www.youtube.com/watch?v={video_id}"
 
-CHANNEL_ID = sys.argv[1]
-RANGE = sys.argv[2] if len(sys.argv) > 2 else None
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='Play random YouTube videos from a channel.')
+parser.add_argument('channel_id', help='YouTube channel ID')
+parser.add_argument('range', nargs='?', help='Range of videos (e.g., 1-100)')
+parser.add_argument('--playlist', type=int, help='Create playlist of N random videos')
+parser.add_argument('--shuffle', action='store_true', help='Shuffle the playlist')
+args = parser.parse_args()
+
+CHANNEL_ID = args.channel_id
+RANGE = args.range
+PLAYLIST_SIZE = args.playlist
+SHUFFLE = args.shuffle
 LOADING_VIDEO = "loading.mp4"
 CACHE_DIR = "cache"
 CACHE_FILE = os.path.join(CACHE_DIR, f"{CHANNEL_ID}.txt")
@@ -43,7 +47,30 @@ if RANGE:
 else:
     start, end = 1, total
 
-youtube_url = select_random_video(video_ids, start, end)
+# Generate playlist or single video
+if PLAYLIST_SIZE:
+    # Ensure playlist size doesn't exceed available videos
+    available_videos = min(PLAYLIST_SIZE, end - start + 1)
+    if available_videos < PLAYLIST_SIZE:
+        print(f"Warning: Only {available_videos} videos available in range {start}-{end}")
+
+    # Generate non-repeating random indices
+    indices = list(range(start - 1, end))  # Convert to 0-based
+    if SHUFFLE:
+        random.shuffle(indices)
+    selected_indices = indices[:available_videos]
+
+    # Create playlist URLs
+    playlist_urls = [f"https://www.youtube.com/watch?v={video_ids[i]}" for i in selected_indices]
+    print(f"Generated playlist of {len(playlist_urls)} videos")
+
+    # First video for initial playback
+    youtube_url = playlist_urls[0]
+    remaining_playlist = playlist_urls[1:] if len(playlist_urls) > 1 else []
+else:
+    # Single random video mode (original behavior)
+    youtube_url = select_random_video(video_ids, start, end)
+    remaining_playlist = []
 
 SOCKET = f"/tmp/mpv_socket_{os.getpid()}"
 MPV_LOG = os.path.expanduser("~/mpv_scriptlog.txt")
@@ -86,40 +113,23 @@ mpv.command("loadfile", youtube_url, "append-play")
 mpv.loop_file = "no"  # Only loop the loading video
 
 print("YouTube video will play when ready.")
-print("Controls: n = next video, q = quit, Ctrl+C = exit and clean up.")
+if PLAYLIST_SIZE:
+    print(f"Playlist mode: {len(playlist_urls)} videos loaded")
+    print("Use MPV controls: > for next video, < for previous video")
+else:
+    print("Single video mode: Press Ctrl+C to exit")
 
-# Save terminal settings
-old_settings = termios.tcgetattr(sys.stdin)
+# Add remaining videos to playlist if in playlist mode
+for url in remaining_playlist:
+    mpv.command("loadfile", url, "append-play")
+
 try:
-    tty.setcbreak(sys.stdin.fileno())
-
-    try:
-        while True:
-            # Check for key press
-            if is_key_pressed():
-                key = sys.stdin.read(1).lower()
-                if key == 'n':
-                    print("Loading next random video...")
-                    # Select new random video
-                    next_url = select_random_video(video_ids, start, end)
-
-                    # Append new video to playlist
-                    mpv.command("loadfile", next_url, "append-play")
-                    print(f"Next video queued: {next_url}")
-
-                elif key == 'q':
-                    print("Quitting...")
-                    break
-
-            time.sleep(0.1)  # Small sleep to prevent CPU spinning
-
-    except KeyboardInterrupt:
-        print("Exiting and cleaning up...")
-
+    # Wait for user to interrupt
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("Exiting and cleaning up...")
 finally:
-    # Restore terminal settings
-    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-
     # Cleanup MPV and socket
     print("Cleaning up MPV...")
     mpv.terminate()
