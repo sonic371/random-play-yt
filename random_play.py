@@ -3,7 +3,6 @@ import sys
 import random
 import subprocess
 import time
-import signal
 import argparse
 from python_mpv_jsonipc import MPV
 
@@ -124,12 +123,9 @@ if any_filters:
     if not filtered_indices:
         print("No videos match the filter criteria. Exiting.")
         sys.exit(1)
-    filtered_start = 1
-    filtered_end = len(filtered_indices)
     print(f"Filtered: {len(filtered_indices)} videos match criteria out of {end - start + 1} in range")
 else:
     filtered_indices = list(range(start - 1, end))
-    filtered_start, filtered_end = start, end
 
 # Generate playlist or single video
 if PLAYLIST_SIZE:
@@ -188,18 +184,9 @@ else:
 SOCKET = f"/tmp/mpv_socket_{os.getpid()}"
 MPV_LOG = "mpv_scriptlog.txt"
 
-# Kill any existing mpv process using the same socket
+# Remove stale socket from a previous run (unlikely with PID in path)
 if os.path.exists(SOCKET):
-    try:
-        pid_output = subprocess.check_output(
-            f"lsof -t {SOCKET}", shell=True
-        ).decode().strip()
-        if pid_output:
-            for pid in pid_output.splitlines():
-                os.kill(int(pid), signal.SIGTERM)
-        os.remove(SOCKET)
-    except Exception:
-        pass
+    os.remove(SOCKET)
 
 print(f"Starting mpv with log at {MPV_LOG}")
 mpv_proc = subprocess.Popen([
