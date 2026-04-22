@@ -21,6 +21,8 @@ parser.add_argument('--shorts', action='store_true', help='Only show Shorts (vid
 parser.add_argument('--no-shorts', action='store_true', help='Exclude Shorts')
 parser.add_argument('--max-resolution', type=int,
     help='Maximum video height (e.g., 1080 to cap at 1080p)')
+parser.add_argument('--sleep', type=int,
+    help='Automatically close mpv after N seconds')
 args = parser.parse_args()
 
 CHANNEL_ID = args.channel_id
@@ -240,10 +242,20 @@ else:
 for url in remaining_playlist:
     mpv.command("loadfile", url, "append-play")
 
+sleep_end = time.time() + args.sleep if args.sleep else None
+if sleep_end:
+    remaining = int(sleep_end - time.time())
+    print(f"Sleep timer: mpv will close in {remaining // 60}m{remaining % 60}s")
+
 try:
     # Wait for user to interrupt or MPV to exit
     while True:
         time.sleep(0.5)
+        # Check sleep timer
+        if sleep_end and time.time() >= sleep_end:
+            print("Sleep timer reached, closing mpv...")
+            mpv.quit()
+            break
         # Check if MPV process has terminated
         if mpv_proc.poll() is not None:
             print("MPV has exited, cleaning up...")

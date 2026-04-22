@@ -86,6 +86,24 @@ python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --playlist 5 --shuffle \
 python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg 1-100 --playlist 5 --shuffle
 ```
 
+**Cap video resolution:**
+```bash
+# Don't stream higher than 1080p
+python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --max-resolution 1080
+
+# Cap at 720p (good for slower connections)
+python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --max-resolution 720
+```
+
+**Sleep timer — auto-close mpv after a set time:**
+```bash
+# Close mpv after 30 minutes
+python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --sleep 1800
+
+# Close after 1 hour with playlist
+python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --playlist 10 --shuffle --sleep 3600
+```
+
 ## How it works
 
 1. Fetches and caches video metadata (ID, title, duration, upload date) from the channel using `yt-dlp`
