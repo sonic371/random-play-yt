@@ -113,3 +113,8 @@ python random_play.py UCq6VFHwMzcMXbuKyG7SQYIg --playlist 10 --shuffle --sleep 3
 5. Exits when `mpv` is closed or Ctrl+C is pressed
 
 Use `>` / `<` in mpv to skip between playlist items.
+
+## Ideas
+
+- `--search` to filter videos by title keywords
+- Build the cache in parallel for channels with many videos
